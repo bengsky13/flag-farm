@@ -617,8 +617,9 @@ def run_sploit(
             )
 
     logger.warning(
-        '[%s] all sploits failed',
+        '[%s %s] all sploits failed',
         team_name,
+        team_addr
     )
 
 
