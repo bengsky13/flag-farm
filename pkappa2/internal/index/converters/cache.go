@@ -1,0 +1,103 @@
+package converters
+
+import (
+	"fmt"
+	"path/filepath"
+
+	"github.com/spq/pkappa2/internal/index"
+	"github.com/spq/pkappa2/internal/tools/bitmask"
+)
+
+type (
+	CachedConverter struct {
+		converter *Converter
+		cacheFile *cacheFile
+	}
+	Statistics struct {
+		Name              string
+		CachedStreamCount uint64
+		Processes         []ProcessStats
+	}
+)
+
+func NewCache(converterName, executablePath, indexCachePath string) (*CachedConverter, error) {
+	filename := fmt.Sprintf("converterindex-%s.cidx", converterName)
+	cachePath := filepath.Join(indexCachePath, filename)
+
+	cacheFile, err := NewCacheFile(cachePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &CachedConverter{
+		converter: New(converterName, executablePath),
+		cacheFile: cacheFile,
+	}, nil
+}
+
+func (cache *CachedConverter) Close() error {
+	return cache.cacheFile.Close()
+}
+
+func (cache *CachedConverter) Name() string {
+	return cache.converter.Name()
+}
+
+func (cache *CachedConverter) Statistics() *Statistics {
+	return &Statistics{
+		Name:              cache.converter.Name(),
+		CachedStreamCount: cache.cacheFile.StreamCount(),
+		Processes:         cache.converter.ProcessStats(),
+	}
+}
+
+func (cache *CachedConverter) Stderr(pid int) *ProcessStderr {
+	return cache.converter.Stderr(pid)
+}
+
+func (cache *CachedConverter) MaxProcessCount() int {
+	return cache.converter.MaxProcessCount()
+}
+
+func (cache *CachedConverter) Reset() error {
+	// Stop all converter processes.
+	cache.converter.Reset()
+
+	// Remove the cache file.
+	return cache.cacheFile.Reset()
+}
+
+func (cache *CachedConverter) Contains(streamID uint64) bool {
+	return cache.cacheFile.Contains(streamID)
+}
+
+func (cache *CachedConverter) Data(stream *index.Stream, moreDetails bool) (data []index.Data, clientBytes, serverBytes uint64, wasCached bool, err error) {
+	// See if the stream data is cached already.
+	data, clientBytes, serverBytes, err = cache.cacheFile.Data(stream)
+	if err != nil {
+		return nil, 0, 0, true, err
+	}
+	if data != nil {
+		return data, clientBytes, serverBytes, true, nil
+	}
+
+	// Convert the stream if it's not in the cache.
+	convertedPackets, clientBytes, serverBytes, err := cache.converter.Data(stream, moreDetails)
+	if err != nil {
+		return nil, 0, 0, false, err
+	}
+
+	// Save it to the cache.
+	if err := cache.cacheFile.SetData(stream, convertedPackets); err != nil {
+		return nil, 0, 0, false, err
+	}
+	return convertedPackets, clientBytes, serverBytes, false, nil
+}
+
+func (cache *CachedConverter) DataForSearch(streamID uint64) ([2][]byte, [][2]int, uint64, uint64, bool, error) {
+	return cache.cacheFile.DataForSearch(streamID)
+}
+
+func (cache *CachedConverter) InvalidateChangedStreams(streams *bitmask.LongBitmask) bitmask.LongBitmask {
+	return cache.cacheFile.InvalidateChangedStreams(streams)
+}

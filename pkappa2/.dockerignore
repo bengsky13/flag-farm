@@ -1,0 +1,8 @@
+**/node_modules/
+.git
+**/__pycache__/
+docker_data
+tmp
+.venv/
+.mypy_cache/
+.ruff_cache/

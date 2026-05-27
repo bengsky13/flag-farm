@@ -1,0 +1,24 @@
+{
+  "eslint.workingDirectories": [
+    {
+      "mode": "auto"
+    }
+  ],
+  "eslint.validate": ["javascript", "javascriptreact", "vue"],
+  "editor.formatOnSave": false,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit",
+    "source.fixAll.prettier": "explicit"
+  },
+  "[vue][javascript][javascriptreact][html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[go]": {
+    "editor.defaultFormatter": "golang.go"
+  },
+  "prettier.ignorePath": "./web/.prettierignore",
+  "prettier.configPath": "./web/.prettierrc.json",
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  },
+}

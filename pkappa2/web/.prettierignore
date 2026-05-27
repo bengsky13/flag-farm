@@ -1,0 +1,5 @@
+dist/
+*.md
+src/parser/query.ts
+components.d.ts
+*.guard.ts
