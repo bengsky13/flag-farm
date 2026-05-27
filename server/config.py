@@ -5,7 +5,7 @@ CONFIG = {
     # fetch FLAG_FORMAT from sploits' stdout.
     'TEAMS': {'Team #{}'.format(i): '10.0.0.{}'.format(i)
               for i in range(1, 29 + 1)},
-    "FLAG_FORMAT": r"RTRTNI25\{([A-Za-z0-9+\/=]+)\}",
+    "FLAG_FORMAT": r"FLAG\{([A-Za-z0-9+\/=]+)\}",
 
     # This configures how and where to submit flags.
     # The protocol must be a module in protocols/ directory.
