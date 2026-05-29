@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from math import ceil
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode # Added urlencode
 from urllib.request import Request, urlopen
 
 
@@ -30,12 +30,12 @@ os_windows = (os.name == "nt")
 
 
 HEADER = r'''
- ____            _                   _   _             _____
-|  _ \  ___  ___| |_ _ __ _   _  ___| |_(_)_   _____  |  ___|_ _ _ __ _ __ ___
-| | | |/ _ \/ __| __| '__| | | |/ __| __| \ \ / / _ \ | |_ / _` | '__| '_ ` _ `
-| |_| |  __/\__ \ |_| |  | |_| | (__| |_| |\ V /  __/ |  _| (_| | |  | | | | |
-|____/ \___||___/\__|_|   \__,_|\___|\__|_| \_/ \___| |_|  \__,_|_|  |_| |_| |_|
-
+ ____                       _            _____                    
+| __ )  ___ _ __   __ _ ___| | ___   _  |  ___|_ _ _ __ _ __ ___  
+|  _ \ / _ \ '_ \ / _` / __| |/ / | | | | |_ / _` | '__| '_ ` _ \ 
+| |_) |  __/ | | | (_| \__ \   <| |_| | |  _| (_| | |  | | | | | |
+|____/ \___|_| |_|\__, |___/_|\_\\__, | |_|  \__,_|_|  |_| |_| |_|
+                  |___/          |___/                            
 Multi-sploit farm client
 '''[1:]
 
@@ -113,14 +113,19 @@ class APIException(Exception):
     pass
 
 
+# ------------------------------------------------------------------
+# 1. Update parse_args() to accept the new --download flag
+# ------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run multiple sploits automatically",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
+    # We make 'sploit' optional (nargs="?") so it isn't required when downloading
     parser.add_argument(
         "sploit",
+        nargs="?",
         help="Sploit file OR directory containing multiple sploits",
     )
 
@@ -129,6 +134,13 @@ def parse_args():
         "--server-url",
         metavar="URL",
         default="http://localhost:5000",
+    )
+
+    # Added the new --download flag
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download all saved scripts from the farm server into the local directory",
     )
 
     parser.add_argument(
@@ -184,6 +196,141 @@ def parse_args():
 
     return parser.parse_args()
 
+
+# ------------------------------------------------------------------
+# 2. Add the download worker function
+# ------------------------------------------------------------------
+def download_scripts_from_server(args):
+    """
+    Fetches all scripts from the server via the API and saves them 
+    locally inside their respective challenge folders.
+    """
+    logger.info("Starting scripts download from %s...", args.server_url)
+    
+    try:
+        # Request all script metadata from the server
+        req = Request(urljoin(args.server_url, "/api/scripts/list"))
+        if args.token:
+            req.add_header("X-Token", args.token)
+            
+        with urlopen(req, timeout=SERVER_TIMEOUT) as conn:
+            if conn.status != 200:
+                logger.error("Failed to get scripts list from server. Status: %s", conn.status)
+                return
+            scripts = json.loads(conn.read().decode())
+
+        if not scripts:
+            logger.info("No scripts found on the server to download.")
+            return
+
+        for script in scripts:
+            chall_name = script['chall_name']
+            exp_name = script['exp_name']
+            content = script['content']
+
+            # If it's the fallback folder, you can save it directly or keep the directory
+            target_dir = Path(chall_name)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            
+            file_path = target_dir / exp_name
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # Make the file executable locally if it's on a non-Windows machine
+            if not os_windows:
+                file_path.chmod(file_path.stat().st_mode | stat.S_IXUSR)
+
+            logger.info("Downloaded and saved: %s/%s", chall_name, exp_name)
+
+        logger.info("Successfully downloaded %d script(s).", len(scripts))
+
+    except Exception as e:
+        logger.critical("Error downloading scripts: %r", e)
+
+
+# ------------------------------------------------------------------
+# 3. Update main() to intercept the --download flag immediately
+# ------------------------------------------------------------------
+def main(args):
+    # Quick URL fix formatting
+    if "://" not in args.server_url:
+        args.server_url = "http://" + args.server_url
+
+    print(highlight(HEADER))
+
+    # If --download is passed, execute downloading process and exit directly
+    if args.download:
+        download_scripts_from_server(args)
+        return
+
+    # Otherwise, validate regular attack arguments and continue normal loop execution
+    if not args.sploit:
+        logger.critical("Error: Please provide a sploit target file/folder name or run with --download.")
+        return
+
+    try:
+        fix_args(args)
+    except Exception as e:
+        logger.critical("%s", e)
+        return
+
+    logger.info(
+        "connecting to %s",
+        args.server_url,
+    )
+
+    threading.Thread(
+        target=lambda: run_post_loop(args),
+        daemon=True,
+    ).start()
+
+    pool = ThreadPoolExecutor(
+        max_workers=args.pool_size
+    )
+
+    config = None
+    flag_format = None
+
+    # Sync scripts once to the server right before entering the attack loop
+    upload_scripts_to_server(args)
+
+    for attack_no in once_in_a_period(args.attack_period):
+        try:
+            config = get_config(args)
+            flag_format = re.compile(config["FLAG_FORMAT"])
+        except Exception as e:
+            logger.error("failed fetching config: %r", e)
+            if attack_no == 1:
+                return
+            continue
+
+        teams = get_target_teams(args, config["TEAMS"])
+        if not teams:
+            logger.error("no teams")
+            if attack_no == 1:
+                return
+            continue
+
+        logger.info(
+            "launching attack #%d against %d teams",
+            attack_no,
+            len(teams),
+        )
+
+        divisor = ceil((len(teams) * len(args.sploit_paths)) / args.pool_size)
+        max_runtime = max(1, args.attack_period / divisor)
+        show_time_limit_info(args, config, max_runtime, attack_no)
+
+        for team_name, team_addr in teams.items():
+            pool.submit(
+                run_sploit,
+                args,
+                team_name,
+                team_addr,
+                attack_no,
+                max_runtime,
+                flag_format,
+            )
 
 def discover_sploits(path):
     path = Path(path)
@@ -306,6 +453,54 @@ def get_config(args):
             raise APIException(conn.read())
 
         return json.loads(conn.read().decode())
+
+
+def upload_scripts_to_server(args):
+    """
+    Reads local script files passed in the arguments and syncs them to the farm server
+    matching the chall_name/exp_name structure.
+    """
+    for path_str in args.sploit_paths:
+        try:
+            path = Path(path_str)
+            
+            # Determine challenge folder name and filename
+            if path.parent.name and path.parent.name != '.':
+                chall_name = path.parent.name
+            else:
+                # If path was passed directly as a standalone file (e.g., 'exp1.py')
+                chall_name = "standalone_exploits"
+                
+            exp_name = path.name
+
+            with open(path, "r", errors="ignore") as f:
+                content = f.read()
+
+            # Prepare form-encoded payload expected by Flask's request.form
+            payload = {
+                'chall_name': chall_name,
+                'exp_name': exp_name,
+                'content': content
+            }
+            data = urlencode(payload).encode('utf-8')
+
+            req = Request(
+                urljoin(args.server_url, "/api/scripts/add"),
+                data=data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            )
+
+            if args.token:
+                req.add_header("X-Token", args.token)
+
+            with urlopen(req, timeout=SERVER_TIMEOUT) as conn:
+                if conn.status == 200:
+                    logger.info("Synchronized script safely to server: %s/%s", chall_name, exp_name)
+                else:
+                    logger.error("Failed to sync script %s to server, Status: %s", exp_name, conn.status)
+
+        except Exception as e:
+            logger.error("Error running server script synchronization for %s: %r", path_str, e)
 
 
 def post_flags(args, flags):
@@ -722,105 +917,6 @@ def shutdown():
                 proc.kill()
             except Exception:
                 pass
-
-
-def main(args):
-    try:
-        fix_args(args)
-
-    except Exception as e:
-        logger.critical("%s", e)
-        return
-
-    print(highlight(HEADER))
-
-    logger.info(
-        "connecting to %s",
-        args.server_url,
-    )
-
-    threading.Thread(
-        target=lambda: run_post_loop(args),
-        daemon=True,
-    ).start()
-
-    pool = ThreadPoolExecutor(
-        max_workers=args.pool_size
-    )
-
-    config = None
-    flag_format = None
-
-    for attack_no in once_in_a_period(
-        args.attack_period
-    ):
-        try:
-            config = get_config(args)
-
-            flag_format = re.compile(
-                config["FLAG_FORMAT"]
-            )
-
-        except Exception as e:
-            logger.error(
-                "failed fetching config: %r",
-                e,
-            )
-
-            if attack_no == 1:
-                return
-
-            continue
-
-        teams = get_target_teams(
-            args,
-            config["TEAMS"],
-        )
-
-        if not teams:
-            logger.error("no teams")
-
-            if attack_no == 1:
-                return
-
-            continue
-
-        logger.info(
-            "launching attack #%d against %d teams",
-            attack_no,
-            len(teams),
-        )
-
-        divisor = ceil(
-            (
-                len(teams)
-                * len(args.sploit_paths)
-            ) / args.pool_size
-        )
-
-        max_runtime = max(
-            1,
-            args.attack_period / divisor,
-        )
-
-        show_time_limit_info(
-            args,
-            config,
-            max_runtime,
-            attack_no,
-        )
-
-        for team_name, team_addr in teams.items():
-            pool.submit(
-                run_sploit,
-                args,
-                team_name,
-                team_addr,
-                attack_no,
-                max_runtime,
-                flag_format,
-            )
-
 
 if __name__ == "__main__":
     try:
