@@ -32,6 +32,16 @@ def index():
                            distinct_values=distinct_values,
                            server_tz_name=server_tz_name)
 
+@app.route('/scripts')
+@auth.auth_required
+def scripts_page():
+    """Renders the scripts management dashboard."""
+    # Fetch all stored scripts from the database
+    all_scripts = database.get_all_scripts()
+    
+    # Render the HTML template, passing the scripts variable
+    return render_template('scripts.html', scripts=all_scripts)
+
 
 FORM_DATETIME_FORMAT = '%Y-%m-%d %H:%M'
 FLAGS_PER_PAGE = 30

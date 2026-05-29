@@ -70,7 +70,51 @@ def get(context_bound=True):
 def query(sql, args=()):
     return get().execute(sql, args).fetchall()
 
+# Add these helper functions at the bottom of your database file or wherever your queries live:
 
+def get_all_scripts():
+    """Fetches all scripts, ordered by challenge name and script name."""
+    db = get()
+    cursor = db.cursor()
+    cursor.execute("SELECT chall_name, exp_name, content FROM scripts ORDER BY chall_name, exp_name")
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def get_script(chall_name, exp_name):
+    """Fetches a specific script's contents."""
+    db = get()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT chall_name, exp_name, content FROM scripts WHERE chall_name = ? AND exp_name = ?",
+        (chall_name, exp_name)
+    )
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def add_or_update_script(chall_name, exp_name, content):
+    """Inserts a new script or overwrites an existing one if the name matches."""
+    db = get()
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO scripts (chall_name, exp_name, content)
+        VALUES (?, ?, ?)
+        """,
+        (chall_name, exp_name, content)
+    )
+    db.commit()
+
+
+def delete_script(chall_name, exp_name):
+    """Deletes a script from the database."""
+    db = get()
+    cursor = db.cursor()
+    cursor.execute(
+        "DELETE FROM scripts WHERE chall_name = ? AND exp_name = ?",
+        (chall_name, exp_name)
+    )
+    db.commit()
 @app.teardown_appcontext
 def close(_):
     if 'database' in g:

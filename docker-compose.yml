@@ -13,12 +13,12 @@ services:
   #     - DISCORD_WEBHOOK_URL=https://discord.com
   #     - TEAM_IDENTIFIER="PETIR - tolong dipakai dulu sepatunya"
   #   restart: unless-stopped
-  pkappa2:
-    build:
-      context: pkappa2
-    ports:
-      - 8080:8080
-    restart: unless-stopped
-    env_file:
-      # Change values in .env file
-      - pkappa2/.env
+  # pkappa2:
+  #   build:
+  #     context: pkappa2
+  #   ports:
+  #     - 8080:8080
+  #   restart: unless-stopped
+  #   env_file:
+  #     # Change values in .env file
+  #     - pkappa2/.env

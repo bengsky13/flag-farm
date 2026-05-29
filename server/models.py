@@ -11,3 +11,6 @@ class FlagStatus(Enum):
 
 Flag = namedtuple('Flag', ['flag', 'sploit', 'team', 'time', 'status', 'checksystem_response'])
 SubmitResult = namedtuple('SubmitResult', ['flag', 'status', 'checksystem_response'])
+
+# New Model for managing saved exploit scripts
+Script = namedtuple('Script', ['chall_name', 'exp_name', 'content'])
